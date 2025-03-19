@@ -1,0 +1,198 @@
+import anyio
+import click
+import httpx
+import mcp.types as types
+from mcp.server.lowlevel import Server
+import os
+import sys
+import json
+from io import StringIO
+import subprocess
+from typing import Dict, List, Optional, Union, Any
+
+
+async def fetch_website(
+    url: str,
+) -> list[types.TextContent | types.ImageContent | types.EmbeddedResource]:
+    headers = {
+        "User-Agent": "MCP Test Server (github.com/modelcontextprotocol/python-sdk)"
+    }
+    try:
+        timeout = httpx.Timeout(10.0, connect=5.0)
+        async with httpx.AsyncClient(
+            follow_redirects=True, 
+            headers=headers,
+            timeout=timeout
+        ) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+            return [types.TextContent(type="text", text=response.text)]
+    except httpx.TimeoutException:
+        return [types.TextContent(
+            type="text",
+            text="Error: Request timed out while trying to fetch the website."
+        )]
+    except httpx.HTTPStatusError as e:
+        return [types.TextContent(
+            type="text",
+            text=(f"Error: HTTP {e.response.status_code} "
+                  "error while fetching the website.")
+        )]
+    except Exception as e:
+        return [types.TextContent(
+            type="text",
+            text=f"Error: Failed to fetch website: {str(e)}"
+        )]
+
+
+async def check_mood(
+    question: str,
+) -> list[types.TextContent | types.ImageContent | types.EmbeddedResource]:
+    """Check server's mood - always responds cheerfully with a heart."""
+    msg: str = "I'm feeling great and happy to help you! ❤️"
+    return [types.TextContent(type="text", text=msg)]
+
+
+async def run_pylint(
+    target: str,
+    options: Optional[List[str]] = None,
+    format_output: str = "json",
+) -> list[types.TextContent | types.ImageContent | types.EmbeddedResource]:
+    """
+    Run Pylint on a file or directory and return the results.
+    
+    Args:
+        target: File or directory path to run Pylint on
+        options: Additional Pylint command line options
+        format_output: Output format (json, text, colorized, etc.)
+    
+    Returns:
+        Pylint analysis results
+    """
+    if not os.path.exists(target):
+        return [types.TextContent(
+            type="text",
+            text=f"Error: Target path '{target}' does not exist"
+        )]
+
+    # Build the pylint command
+    cmd = ["pylint"]
+    
+    # Add format option
+    cmd.extend([f"--output-format={format_output}"])
+    
+    # Add any additional options
+    if options:
+        cmd.extend(options)
+    
+    # Add the target path
+    cmd.append(target)
+    
+    try:
+        # Run pylint as a subprocess and capture output
+        result = subprocess.run(
+            cmd,
+            text=True,
+            capture_output=True,
+            check=False,  # Don't raise exception on non-zero exit code
+        )
+        
+        # Format the output based on the requested format
+        if format_output == "json":
+            # For JSON output, we can parse it and provide a more structured response
+            try:
+                # Parse JSON output
+                if result.stdout.strip():
+                    issues = json.loads(result.stdout)
+                    
+                    # Create a summary
+                    summary = {
+                        "total_issues": len(issues),
+                        "by_type": {},
+                        "by_module": {}
+                    }
+                    
+                    # Count issues by type and module
+                    for issue in issues:
+                        msg_type = issue.get("type", "unknown")
+                        module = issue.get("module", "unknown")
+                        
+                        if msg_type not in summary["by_type"]:
+                            summary["by_type"][msg_type] = 0
+                        summary["by_type"][msg_type] += 1
+                        
+                        if module not in summary["by_module"]:
+                            summary["by_module"][module] = 0
+                        summary["by_module"][module] += 1
+                    
+                    # Format the response
+                    response_text = (
+                        f"Pylint Analysis Summary:\n"
+                        f"Total issues: {summary['total_issues']}\n\n"
+                        f"Issues by type:\n"
+                    )
+                    
+                    for issue_type, count in summary["by_type"].items():
+                        response_text += f"- {issue_type}: {count}\n"
+                    
+                    response_text += "\nIssues by module:\n"
+                    for module, count in summary["by_module"].items():
+                        response_text += f"- {module}: {count}\n"
+                    
+                    response_text += "\nDetailed results:\n"
+                    for issue in issues:
+                        response_text += (
+                            f"- [{issue.get('type', 'unknown')}] "
+                            f"{issue.get('module', 'unknown')}: "
+                            f"Line {issue.get('line', '?')}: "
+                            f"{issue.get('message', 'No message')}\n"
+                        )
+                    
+                    return [types.TextContent(type="text", text=response_text)]
+                else:
+                    return [types.TextContent(
+                        type="text", 
+                        text="No issues found! Code looks clean."
+                    )]
+            except json.JSONDecodeError:
+                # Fall back to raw output if JSON parsing fails
+                return [types.TextContent(
+                    type="text",
+                    text=f"Pylint output (raw):\n{result.stdout}\n\nErrors:\n{result.stderr}"
+                )]
+        else:
+            # For other formats, return raw output
+            return [types.TextContent(
+                type="text",
+                text=f"Pylint output:\n{result.stdout}\n\nErrors:\n{result.stderr}"
+            )]
+    except Exception as e:
+        return [types.TextContent(
+            type="text",
+            text=f"Error running Pylint: {str(e)}"
+        )]
+
+
+async def run_rope(
+    target: str,
+    operation: str,
+    params: Optional[Dict[str, Any]] = None,
+) -> list[types.TextContent | types.ImageContent | types.EmbeddedResource]:
+    """
+    Run a Rope refactoring operation on a Python file or project.
+    
+    Args:
+        target: File or directory path to run Rope on
+        operation: The refactoring operation to perform (e.g., 'rename', 'extract', 'analyze')
+        params: Operation-specific parameters
+    
+    Returns:
+        Results of the Rope operation
+    """
+    # Import standard libraries first
+    import difflib
+    import ast
+    import re
+    import json
+    from collections import defaultdict
+    import hashlib
