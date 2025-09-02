@@ -1,0 +1,5 @@
+{
+  "clips": [
+    {"file": "clip1.mov", "start": 0, "duration": 10}
+  ]
+}
