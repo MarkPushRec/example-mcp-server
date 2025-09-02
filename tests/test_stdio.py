@@ -1,8 +1,12 @@
 import asyncio
 
 import pytest
-from mcp.client.session import ClientSession
-from mcp.client.stdio import StdioServerParameters, stdio_client
+
+try:  # pragma: no cover - optional dependency
+    from mcp.client.session import ClientSession
+    from mcp.client.stdio import StdioServerParameters, stdio_client
+except ModuleNotFoundError:
+    pytest.skip("mcp package not installed", allow_module_level=True)
 
 
 @pytest.mark.asyncio
